@@ -70,6 +70,9 @@ PALETTES = {
 
 def load_palettes():
     try:
+        here = os.path.dirname(os.path.realpath(CF_FETCH))
+        if here not in sys.path:            # cf-fetch imports cf_anim from beside it
+            sys.path.append(here)
         spec = importlib.util.spec_from_file_location("cf_fetch", CF_FETCH)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
@@ -640,8 +643,11 @@ def short_rate(bps):
     return f"{bps:.0f}T"
 
 
-# fixed status colours (palette colours vary too much to carry meaning)
+# fixed status colours (palette colours vary too much to carry meaning);
+# a light palette (own bg/fg, dark: false) gets the darker set
 OK, WARN, BAD, TEMP = "#05ffa1", "#ffb000", "#ff1744", "#c77dff"
+STATUS_DARK = (OK, WARN, BAD, TEMP)
+STATUS_LIGHT = ("#137a45", "#a86400", "#c0002a", "#7a2fc0")
 
 SOURCE_INFO = {
     "static":  (OK,     "saved"),
@@ -649,6 +655,13 @@ SOURCE_INFO = {
     "dhcp":    (None,   "from DHCP"),          # palette accent
     "live":    (TEMP,   "temporary, gone when the port reconnects"),
 }
+
+
+def set_status_for(pal):
+    global OK, WARN, BAD, TEMP
+    OK, WARN, BAD, TEMP = STATUS_DARK if pal.get("dark", True) else STATUS_LIGHT
+    for key, col in (("static", OK), ("pending", WARN), ("live", TEMP)):
+        SOURCE_INFO[key] = (col, SOURCE_INFO[key][1])
 
 
 # ── Widgets ─────────────────────────────────────────────────────────────────
@@ -1146,10 +1159,15 @@ class IpAdd(App):
 
     def register_palettes(self):
         for name, pal in self.palettes.items():
+            colours = dict(foreground="#e6e6f0", background="#0a0a12", surface="#12121e",
+                           panel="#1a1a2a", dark=True)
+            if "bg" in pal and "fg" in pal:      # own palettes (cftheme) bring their own bg/fg
+                colours = dict(foreground=pal["fg"], background=pal["bg"], surface=pal["bg"],
+                               panel=pal["bg"], dark=pal.get("dark", True))
+            ok, warn, bad, _ = STATUS_DARK if colours["dark"] else STATUS_LIGHT
             self.register_theme(Theme(
                 name=self.theme_name(name), primary=pal["fill"][0], secondary=pal["fill"][-1],
-                accent=pal["shadow"], warning=WARN, error=BAD, success=OK,
-                foreground="#e6e6f0", background="#0a0a12", surface="#12121e", panel="#1a1a2a", dark=True))
+                accent=pal["shadow"], warning=warn, error=bad, success=ok, **colours))
 
     # layout -----------------------------------------------------------------
     def compose(self):
@@ -1178,6 +1196,7 @@ class IpAdd(App):
 
     def on_mount(self):
         self.register_palettes()
+        set_status_for(self.pal)
         self.theme = self.theme_name(self.pal_name)
         self.query_one("#addrs", DataTable).add_columns(" ", "ADDRESS", "SUBNET MASK", "NETWORK", "SOURCE")
         self.query_one("#neigh", DataTable).add_columns(" ", "IP", "MAC", "STATE", "VENDOR")
@@ -1372,6 +1391,7 @@ class IpAdd(App):
     def action_palette(self):
         names = list(self.palettes)
         self.pal_name = names[(names.index(self.pal_name) + 1) % len(names)]
+        set_status_for(self.pal)
         self.theme = self.theme_name(self.pal_name)
         self.notify(self.pal_name, title="palette", timeout=2)
         self.query_one(Banner).refresh()
